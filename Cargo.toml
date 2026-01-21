@@ -2,6 +2,8 @@
 name = "degenproto_engine"
 version = "0.1.0"
 edition = "2024"
+description = "Rust library for parsing RON configuration files and generating React/JSX code"
+license = "MIT"
 
 [dependencies]
 ron = "0.8"
