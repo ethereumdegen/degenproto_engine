@@ -6,7 +6,7 @@ mod router_jsx;
 pub use router_jsx::RouterJsx;
 
 mod view_proto;
-pub use view_proto::{ViewProto, Import, ImportKind, Element, PropValue, ComponentDef, ComponentDefs, AssetDef, AssetDefs, AssetKind};
+pub use view_proto::{ViewProto, Import, ImportKind, Element, PropValue, ComponentDef, ComponentDefs, AssetDef, AssetDefs, AssetKind, ContentDefs, ContentValue};
 
 mod view_jsx;
 pub use view_jsx::ViewJsx;

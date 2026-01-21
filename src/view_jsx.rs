@@ -1,15 +1,16 @@
-use crate::view_proto::{AssetDefs, AssetKind, ComponentDefs, Element, PropValue, ViewProto};
+use crate::view_proto::{AssetDefs, AssetKind, ComponentDefs, ContentDefs, ContentValue, Element, PropValue, ViewProto};
 use std::collections::{HashMap, HashSet};
 
 pub struct ViewJsx {
     pub proto: ViewProto,
     pub component_defs: ComponentDefs,
     pub asset_defs: AssetDefs,
+    pub content_defs: ContentDefs,
 }
 
 impl ViewJsx {
-    pub fn new(proto: ViewProto, component_defs: ComponentDefs, asset_defs: AssetDefs) -> Self {
-        Self { proto, component_defs, asset_defs }
+    pub fn new(proto: ViewProto, component_defs: ComponentDefs, asset_defs: AssetDefs, content_defs: ContentDefs) -> Self {
+        Self { proto, component_defs, asset_defs, content_defs }
     }
 
     pub fn to_string(&self) -> String {
@@ -63,7 +64,7 @@ impl ViewJsx {
         output.push_str("  return (\n");
 
         // Render the tree
-        let tree_jsx = self.render_element(&self.proto.tree, 4);
+        let tree_jsx = self.render_element(&self.proto.tree, 4, None);
         output.push_str(&tree_jsx);
 
         output.push_str("  );\n");
@@ -120,10 +121,13 @@ impl ViewJsx {
                     self.collect_refs_recursive(child, assets, components);
                 }
             }
+            Element::ContentList { template, .. } => {
+                self.collect_refs_recursive(template, assets, components);
+            }
         }
     }
 
-    fn render_element(&self, element: &Element, indent: usize) -> String {
+    fn render_element(&self, element: &Element, indent: usize, record_ctx: Option<&HashMap<String, String>>) -> String {
         match element {
             Element::Text(text) => {
                 let indent_str = " ".repeat(indent);
@@ -131,7 +135,7 @@ impl ViewJsx {
             }
 
             Element::Node { tag, class_name, props, children } => {
-                self.render_node(tag, class_name.as_deref(), props, children, indent)
+                self.render_node(tag, class_name.as_deref(), props, children, indent, record_ctx)
             }
 
             Element::ComponentRef { component, props, children } => {
@@ -146,11 +150,23 @@ impl ViewJsx {
                     // Add class_name if defined
                     let class_name = def.class_name.as_deref();
 
-                    self.render_node(&def.tag, class_name, &merged_props, children, indent)
+                    self.render_node(&def.tag, class_name, &merged_props, children, indent, record_ctx)
                 } else {
                     // Unknown component - render as-is (might be an imported React component)
-                    self.render_node(component, None, props, children, indent)
+                    self.render_node(component, None, props, children, indent, record_ctx)
                 }
+            }
+
+            Element::ContentList { source, template } => {
+                let mut output = String::new();
+                if let Some(list) = self.content_defs.get_list(source) {
+                    for item in list {
+                        if let ContentValue::Record(record) = item {
+                            output.push_str(&self.render_element(template, indent, Some(record)));
+                        }
+                    }
+                }
+                output
             }
         }
     }
@@ -162,6 +178,7 @@ impl ViewJsx {
         props: &HashMap<String, PropValue>,
         children: &[Box<Element>],
         indent: usize,
+        record_ctx: Option<&HashMap<String, String>>,
     ) -> String {
         let indent_str = " ".repeat(indent);
         let mut output = String::new();
@@ -183,12 +200,12 @@ impl ViewJsx {
                 // Special "text" prop becomes children text
                 continue;
             }
-            let prop_str = self.render_prop(key, value);
+            let prop_str = self.render_prop(key, value, record_ctx);
             output.push_str(&format!(" {}", prop_str));
         }
 
         // Check for text prop (used as inner text)
-        let text_content = props.get("text").map(|v| self.prop_value_to_string(v));
+        let text_content = props.get("text").map(|v| self.prop_value_to_string(v, record_ctx));
 
         let has_children = !children.is_empty() || text_content.is_some();
 
@@ -202,7 +219,7 @@ impl ViewJsx {
 
             // Render children
             for child in children {
-                output.push_str(&self.render_element(child, indent + 2));
+                output.push_str(&self.render_element(child, indent + 2, record_ctx));
             }
 
             // Closing tag
@@ -215,7 +232,7 @@ impl ViewJsx {
         output
     }
 
-    fn render_prop(&self, key: &str, value: &PropValue) -> String {
+    fn render_prop(&self, key: &str, value: &PropValue, record_ctx: Option<&HashMap<String, String>>) -> String {
         match value {
             PropValue::Str(s) => {
                 format!("{}=\"{}\"", key, s)
@@ -255,10 +272,30 @@ impl ViewJsx {
                     format!("{}={{{}}}", key, asset_name)
                 }
             }
+            PropValue::Content(content_name) => {
+                // Look up content and inline it as a string
+                if let Some(text) = self.content_defs.get_str(content_name) {
+                    format!("{}=\"{}\"", key, text)
+                } else {
+                    format!("{}=\"\"", key)
+                }
+            }
+            PropValue::ContentField(field_name) => {
+                // Look up field in current record context
+                if let Some(record) = record_ctx {
+                    if let Some(value) = record.get(field_name) {
+                        format!("{}=\"{}\"", key, value)
+                    } else {
+                        format!("{}=\"\"", key)
+                    }
+                } else {
+                    format!("{}=\"\"", key)
+                }
+            }
         }
     }
 
-    fn prop_value_to_string(&self, value: &PropValue) -> String {
+    fn prop_value_to_string(&self, value: &PropValue, record_ctx: Option<&HashMap<String, String>>) -> String {
         match value {
             PropValue::Str(s) => s.clone(),
             PropValue::Num(n) => n.to_string(),
@@ -272,6 +309,16 @@ impl ViewJsx {
                     }
                 } else {
                     format!("{{{}}}", asset_name)
+                }
+            }
+            PropValue::Content(content_name) => {
+                self.content_defs.get_str(content_name).cloned().unwrap_or_default()
+            }
+            PropValue::ContentField(field_name) => {
+                if let Some(record) = record_ctx {
+                    record.get(field_name).cloned().unwrap_or_default()
+                } else {
+                    String::new()
                 }
             }
         }

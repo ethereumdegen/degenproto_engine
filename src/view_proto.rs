@@ -9,8 +9,10 @@ pub enum PropValue {
     Str(String),
     Num(f64),
     Bool(bool),
-    Var(String),       // Variable reference
-    Asset(String),     // Asset reference - looked up in AssetDefs
+    Var(String),         // Variable reference
+    Asset(String),       // Asset reference - looked up in AssetDefs
+    Content(String),     // Content reference - looked up in ContentDefs
+    ContentField(String), // Field reference within a ContentList context
 }
 
 /// An element in the tree
@@ -37,6 +39,12 @@ pub enum Element {
         props: HashMap<String, PropValue>,
         #[serde(default)]
         children: Vec<Box<Element>>,
+    },
+
+    /// Iterate over a content list
+    ContentList {
+        source: String,           // Key in ContentDefs (must be a List)
+        template: Box<Element>,   // Template using ContentField references
     },
 }
 
@@ -155,5 +163,49 @@ impl ViewProto {
             .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME);
         let proto: ViewProto = options.from_str(&content)?;
         Ok(proto)
+    }
+}
+
+/// A content value - can be a string, a record (key-value map), or a list
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub enum ContentValue {
+    Str(String),
+    Record(HashMap<String, String>),
+    List(Vec<ContentValue>),
+}
+
+/// Collection of content definitions
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct ContentDefs {
+    pub content: HashMap<String, ContentValue>,
+}
+
+impl ContentDefs {
+    pub fn from_file<P: AsRef<Path>>(path: P) -> Result<Self, Box<dyn std::error::Error>> {
+        let content = fs::read_to_string(path)?;
+        let options = ron::Options::default()
+            .with_default_extension(ron::extensions::Extensions::IMPLICIT_SOME);
+        let defs: ContentDefs = options.from_str(&content)?;
+        Ok(defs)
+    }
+
+    pub fn get(&self, name: &str) -> Option<&ContentValue> {
+        self.content.get(name)
+    }
+
+    /// Get a string value by name
+    pub fn get_str(&self, name: &str) -> Option<&String> {
+        match self.content.get(name) {
+            Some(ContentValue::Str(s)) => Some(s),
+            _ => None,
+        }
+    }
+
+    /// Get a list value by name
+    pub fn get_list(&self, name: &str) -> Option<&Vec<ContentValue>> {
+        match self.content.get(name) {
+            Some(ContentValue::List(list)) => Some(list),
+            _ => None,
+        }
     }
 }
