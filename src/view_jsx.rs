@@ -32,12 +32,15 @@ impl ViewJsx {
 
         output.push('\n');
 
-        // Auto-generate imports for image assets
+        // Auto-generate imports for image assets (skip external URLs)
         for asset_name in &used_assets {
             if let Some(asset) = self.asset_defs.get(asset_name) {
                 if let AssetKind::Image = asset.kind {
                     if let Some(path) = &asset.path {
-                        output.push_str(&format!("import {} from '{}';\n", asset_name, path));
+                        // Don't import external URLs
+                        if !path.starts_with("http://") && !path.starts_with("https://") {
+                            output.push_str(&format!("import {} from '{}';\n", asset_name, path));
+                        }
                     }
                 }
             }
@@ -255,8 +258,18 @@ impl ViewJsx {
                 if let Some(asset) = self.asset_defs.get(asset_name) {
                     match asset.kind {
                         AssetKind::Image => {
-                            // Image assets are imported, use variable reference
-                            format!("{}={{{}}}", key, asset_name)
+                            // Check if it's an external URL
+                            if let Some(path) = &asset.path {
+                                if path.starts_with("http://") || path.starts_with("https://") {
+                                    // External URL - use directly as string
+                                    format!("{}=\"{}\"", key, path)
+                                } else {
+                                    // Local asset - use imported variable reference
+                                    format!("{}={{{}}}", key, asset_name)
+                                }
+                            } else {
+                                format!("{}={{{}}}", key, asset_name)
+                            }
                         }
                         AssetKind::Youtube | AssetKind::Video | AssetKind::Audio => {
                             // URL-based assets use the URL directly
@@ -304,7 +317,18 @@ impl ViewJsx {
             PropValue::Asset(asset_name) => {
                 if let Some(asset) = self.asset_defs.get(asset_name) {
                     match asset.kind {
-                        AssetKind::Image => format!("{{{}}}", asset_name),
+                        AssetKind::Image => {
+                            // Check if external URL
+                            if let Some(path) = &asset.path {
+                                if path.starts_with("http://") || path.starts_with("https://") {
+                                    path.clone()
+                                } else {
+                                    format!("{{{}}}", asset_name)
+                                }
+                            } else {
+                                format!("{{{}}}", asset_name)
+                            }
+                        }
                         _ => asset.url.clone().unwrap_or_default(),
                     }
                 } else {
