@@ -54,6 +54,9 @@ pub struct ComponentDef {
     pub required_props: Vec<String>,
     #[serde(default)]
     pub children_template: Option<Box<Element>>,
+    /// Optional path to a JSX component file (generates an import)
+    #[serde(default)]
+    pub import_path: Option<String>,
 }
 
 /// Collection of component definitions

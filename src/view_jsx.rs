@@ -18,6 +18,9 @@ impl ViewJsx {
         // Collect all asset references used in the tree
         let used_assets = self.collect_asset_refs(&self.proto.tree);
 
+        // Collect all component references used in the tree
+        let used_components = self.collect_component_refs(&self.proto.tree);
+
         // React import
         output.push_str("import React from 'react';\n");
 
@@ -39,7 +42,16 @@ impl ViewJsx {
             }
         }
 
-        // Component imports from proto (for things like PageSection)
+        // Auto-generate imports for components with import_path
+        for component_name in &used_components {
+            if let Some(def) = self.component_defs.get(component_name) {
+                if let Some(import_path) = &def.import_path {
+                    output.push_str(&format!("import {} from '{}';\n", def.tag, import_path));
+                }
+            }
+        }
+
+        // Manual imports from proto (fallback for anything not in component_defs)
         for import in &self.proto.imports {
             output.push_str(&format!("import {} from '{}';\n", import.name, import.path));
         }
@@ -69,11 +81,22 @@ impl ViewJsx {
 
     fn collect_asset_refs(&self, element: &Element) -> HashSet<String> {
         let mut assets = HashSet::new();
-        self.collect_asset_refs_recursive(element, &mut assets);
+        self.collect_refs_recursive(element, &mut assets, &mut HashSet::new());
         assets
     }
 
-    fn collect_asset_refs_recursive(&self, element: &Element, assets: &mut HashSet<String>) {
+    fn collect_component_refs(&self, element: &Element) -> HashSet<String> {
+        let mut components = HashSet::new();
+        self.collect_refs_recursive(element, &mut HashSet::new(), &mut components);
+        components
+    }
+
+    fn collect_refs_recursive(
+        &self,
+        element: &Element,
+        assets: &mut HashSet<String>,
+        components: &mut HashSet<String>,
+    ) {
         match element {
             Element::Text(_) => {}
             Element::Node { props, children, .. } => {
@@ -83,17 +106,18 @@ impl ViewJsx {
                     }
                 }
                 for child in children {
-                    self.collect_asset_refs_recursive(child, assets);
+                    self.collect_refs_recursive(child, assets, components);
                 }
             }
-            Element::ComponentRef { props, children, .. } => {
+            Element::ComponentRef { component, props, children } => {
+                components.insert(component.clone());
                 for value in props.values() {
                     if let PropValue::Asset(name) = value {
                         assets.insert(name.clone());
                     }
                 }
                 for child in children {
-                    self.collect_asset_refs_recursive(child, assets);
+                    self.collect_refs_recursive(child, assets, components);
                 }
             }
         }

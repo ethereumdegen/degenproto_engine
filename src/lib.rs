@@ -15,6 +15,8 @@ pub use view_jsx::ViewJsx;
 pub struct ProtoIndex {
     pub layouts: Vec<Layout>,
     pub routes: Vec<Route>,
+    #[serde(default)]
+    pub partials: Vec<Partial>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -30,6 +32,12 @@ pub struct Route {
     pub proto: Option<String>,
     pub path: String,
     pub layout: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct Partial {
+    pub name: String,
+    pub path: String,
 }
 
 impl ProtoIndex {

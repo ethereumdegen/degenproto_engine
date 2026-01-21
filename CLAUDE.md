@@ -15,27 +15,27 @@ This is the engine that powers the "boil down to RON" approach - defining a webs
 
 ## Core Types
 
-### Element (recursive tree)
+### Element (recursive tree with Box)
 ```rust
 enum Element {
     Text(String),
     Node { tag, class_name, props, children: Vec<Box<Element>> },
-    ComponentRef { component, props, children },
+    ComponentRef { component, props, children },  // References component_defs by name
 }
 ```
 
 ### PropValue
 ```rust
 enum PropValue {
-    Str(String),
-    Num(f64),
-    Bool(bool),
-    Var(String),      // Variable reference
-    Asset(String),    // Asset lookup
+    Str(String),      // Regular string: "hello"
+    Num(f64),         // Number: 560
+    Bool(bool),       // Boolean: true/false
+    Var(String),      // JS variable reference: {someVar}
+    Asset(String),    // Asset lookup - resolves from AssetDefs
 }
 ```
 
-### ComponentDef (presets)
+### ComponentDef (presets in component_defs.ron)
 ```rust
 struct ComponentDef {
     name: String,
@@ -45,37 +45,57 @@ struct ComponentDef {
 }
 ```
 
-### AssetDef (asset lookup)
+### AssetDef (assets in assets_def.ron)
 ```rust
+enum AssetKind { Image, Youtube, Video, Audio }
+
 struct AssetDef {
     name: String,
-    kind: AssetKind,  // Image, Youtube, Video, Audio
-    path: Option<String>,
-    url: Option<String>,
+    kind: AssetKind,
+    path: Option<String>,  // For Image - generates import
+    url: Option<String>,   // For Youtube/Video - inlines directly
 }
 ```
+
+## Asset Resolution
+
+When `ViewJsx` encounters `Asset("SomeName")`:
+
+1. **Image assets**: Auto-generates an import statement and renders as `{SomeName}`
+   ```jsx
+   import SomeName from '@/assets/path.jpg';
+   // ...
+   <img src={SomeName} />
+   ```
+
+2. **Youtube/Video assets**: Inlines the URL directly (no import)
+   ```jsx
+   <iframe src="https://youtube.com/embed/..." />
+   ```
 
 ## Usage
 
 ```rust
 use degenproto_engine::{ProtoIndex, RouterJsx, ViewProto, ViewJsx, ComponentDefs, AssetDefs};
 
+// Load shared definitions once
+let components = ComponentDefs::from_file("proto/component_defs.ron")?;
+let assets = AssetDefs::from_file("proto/assets_def.ron")?;
+
 // Router generation
 let index = ProtoIndex::from_file("proto/index.ron")?;
 let router = RouterJsx::from_proto_index(index);
-let jsx = router.to_string();
+fs::write("src/router/index.jsx", router.to_string())?;
 
-// View generation
+// View generation (for each route)
 let view = ViewProto::from_file("proto/home.ron")?;
-let components = ComponentDefs::from_file("proto/component_defs.ron")?;
-let assets = AssetDefs::from_file("proto/assets_def.ron")?;
-let view_jsx = ViewJsx::new(view, components, assets);
-let jsx = view_jsx.to_string();
+let view_jsx = ViewJsx::new(view, components.clone(), assets.clone());
+fs::write("src/views/welcome/Home.jsx", view_jsx.to_string())?;
 ```
 
 ## Consumer
 
-Used by `yeriko-dj-web` (sibling directory) as a path dependency. The `degenbuild` binary in that repo calls this library.
+Used by `yeriko-dj-web` (sibling directory) as a path dependency. The `degenbuild` binary iterates over routes in index.ron and generates views for any that have matching .ron files.
 
 ## Design Decisions
 
@@ -83,3 +103,4 @@ Used by `yeriko-dj-web` (sibling directory) as a path dependency. The `degenbuil
 - **Lookup tables** - ComponentDefs and AssetDefs allow referencing by name
 - **Auto-imports** - Image assets automatically generate import statements
 - **URL expansion** - Youtube/Video assets expand to their URLs inline
+- **Data-driven** - degenbuild reads index.ron, nothing hardcoded
